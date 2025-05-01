@@ -29,6 +29,7 @@ public class PurchaseOrderService {
     private final ProductRepository productRepository;
     private final StockLevelRepository stockLevelRepository;
     private final StockMovementService stockMovementService;
+    private final StockWebSocketService stockWebSocketService;
 
     private static final AtomicLong orderSequence = new AtomicLong(1000);
 
@@ -97,6 +98,7 @@ public class PurchaseOrderService {
 
         order.setStatus(OrderStatus.SUBMITTED);
         PurchaseOrder saved = purchaseOrderRepository.save(order);
+        stockWebSocketService.broadcastOrderStatus(saved.getOrderNumber(), "DRAFT", "SUBMITTED");
         log.info("Submitted purchase order: {}", saved.getOrderNumber());
         return toResponse(saved);
     }
@@ -112,6 +114,7 @@ public class PurchaseOrderService {
 
         order.setStatus(OrderStatus.APPROVED);
         PurchaseOrder saved = purchaseOrderRepository.save(order);
+        stockWebSocketService.broadcastOrderStatus(saved.getOrderNumber(), "SUBMITTED", "APPROVED");
         log.info("Approved purchase order: {}", saved.getOrderNumber());
         return toResponse(saved);
     }
@@ -160,6 +163,7 @@ public class PurchaseOrderService {
         order.setStatus(OrderStatus.RECEIVED);
         order.setReceivedAt(LocalDateTime.now());
         PurchaseOrder saved = purchaseOrderRepository.save(order);
+        stockWebSocketService.broadcastOrderStatus(saved.getOrderNumber(), "APPROVED", "RECEIVED");
         log.info("Received purchase order: {} ({} items)", saved.getOrderNumber(), order.getItems().size());
         return toResponse(saved);
     }
@@ -173,8 +177,10 @@ public class PurchaseOrderService {
             throw new IllegalStateException("Cannot cancel an order that is " + order.getStatus());
         }
 
+        String previousStatus = order.getStatus().name();
         order.setStatus(OrderStatus.CANCELLED);
         PurchaseOrder saved = purchaseOrderRepository.save(order);
+        stockWebSocketService.broadcastOrderStatus(saved.getOrderNumber(), previousStatus, "CANCELLED");
         log.info("Cancelled purchase order: {}", saved.getOrderNumber());
         return toResponse(saved);
     }

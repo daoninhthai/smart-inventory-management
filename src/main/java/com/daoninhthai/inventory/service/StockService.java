@@ -23,6 +23,7 @@ public class StockService {
     private final ProductRepository productRepository;
     private final WarehouseRepository warehouseRepository;
     private final StockMovementService stockMovementService;
+    private final StockWebSocketService stockWebSocketService;
 
     @Transactional(readOnly = true)
     public StockLevelResponse getStockLevel(Long productId, Long warehouseId) {
@@ -61,6 +62,8 @@ public class StockService {
                         .quantity(0)
                         .build());
 
+        int oldQty = stockLevel.getQuantity();
+
         switch (request.getType()) {
             case IN -> stockLevel.setQuantity(stockLevel.getQuantity() + request.getQuantity());
             case OUT -> {
@@ -72,11 +75,16 @@ public class StockService {
             case ADJUSTMENT -> stockLevel.setQuantity(request.getQuantity());
             default -> throw new IllegalStateException("Invalid movement type: " + request.getType());
         }
-
         StockLevel saved = stockLevelRepository.save(stockLevel);
 
         stockMovementService.recordMovement(product, warehouse, request.getType(),
                 request.getQuantity(), null, request.getNotes(), null);
+
+        stockWebSocketService.broadcastStockUpdate(
+                product.getId(), product.getSku(),
+                warehouse.getId(), warehouse.getCode(),
+                oldQty, saved.getQuantity(),
+                request.getType().name());
 
         log.info("Stock adjusted: product={}, warehouse={}, type={}, qty={}",
                 product.getSku(), warehouse.getCode(), request.getType(), request.getQuantity());
@@ -128,6 +136,17 @@ public class StockService {
         stockMovementService.recordMovement(product, toWarehouse, MovementType.IN,
                 request.getQuantity(), transferRef,
                 "Transfer from " + fromWarehouse.getCode() + ": " + request.getNotes(), null);
+
+        stockWebSocketService.broadcastStockUpdate(
+                product.getId(), product.getSku(),
+                fromWarehouse.getId(), fromWarehouse.getCode(),
+                sourceStock.getQuantity() + request.getQuantity(), sourceStock.getQuantity(),
+                "TRANSFER_OUT");
+        stockWebSocketService.broadcastStockUpdate(
+                product.getId(), product.getSku(),
+                toWarehouse.getId(), toWarehouse.getCode(),
+                destStock.getQuantity() - request.getQuantity(), destStock.getQuantity(),
+                "TRANSFER_IN");
 
         log.info("Stock transferred: product={}, from={}, to={}, qty={}",
                 product.getSku(), fromWarehouse.getCode(), toWarehouse.getCode(), request.getQuantity());
